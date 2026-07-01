@@ -1,3 +1,3 @@
 pandas==2.2.0
 numpy==1.26.4
-matplotlib==3.8.2
+matplotlib==3.8.2numpy==2.0.2
