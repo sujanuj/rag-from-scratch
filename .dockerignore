@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+tests/
+benchmark/
+*.npz
+*.md
+pytest.ini
