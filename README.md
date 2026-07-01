@@ -1,250 +1,135 @@
-# SER594-Team4-SkillSync
-SkillSync: A Multi-Agent Platform for Learning and Project Partner Recommendation
+# rag-from-scratch
 
-SkillSync was developed because it is very annoying trying to find someone who can join you as your study partner or collaborate with you on your project. Either way, both of them would try posting on a Discord or on LinkedIn and still not find people. Therefore, an effective solution had to be implemented.
-
-How we did it: when users enter their required details regarding their skills and goals, we generate a semantic vector for them using the text that they have entered and store it in DB. The same process is repeated when a user enters his query, and a vector is generated for it, and the most similar vectors are pulled from the database. Recommendations are made only on the basis of semantic similarity and not on any keyword search or filters.
-
-## Live Demo
-
-https://pacific-expression-production-2a5a.up.railway.app
+A retrieval-augmented generation (RAG) pipeline built from scratch in
+Python. No LangChain, no LlamaIndex, no Pinecone — every component
+(chunking, embedding, vector search, generation, serving) is implemented
+directly so the mechanics are fully visible and measurable.
 
 ---
 
-## Team 4
+## What it does
 
-| Name                     | ASU ID     | GitHub Username |
-|--------------------------|------------|-----------------|
-| Aarya Bhatt              | 1235522719 | AaryaBhatt9      |
-| Dhvey Patel              | 1235668761 | Dhvey0201        |
-| Sujan Uppalli Jayadevappa| 1234540166 | sujanu           |
-| Tejas Shah               | 1235403730 | Hero4440         |
+Given a corpus of documents and a natural-language question, the pipeline:
 
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | Next.js 16 + Tailwind CSS |
-| Backend | FastAPI (Python 3.11) |
-| Database | PostgreSQL 15 |
-| Vector Store | ChromaDB |
-| Embeddings | sentence-transformers (all-MiniLM-L6-v2) |
-| Authentication | JWT (python-jose + passlib) |
-| Deployment | Docker Compose |
+1. **Ingests** documents by splitting them into overlapping fixed-size chunks (Phase 1).
+2. **Embeds** each chunk into a dense vector using a pretrained sentence embedding model (Phase 2).
+3. **Retrieves** the top-K most similar chunks using cosine similarity over a flat vector store (Phase 3).
+4. **Generates** an answer by injecting retrieved chunks into a prompt and calling an LLM (Phase 4).
+5. **Serves** the pipeline over HTTP via FastAPI `/ingest` and `/query` endpoints (Phase 5).
 
 ---
 
-## Setup Instructions
+## Phases
 
-### Prerequisites
+**Phase 1: Document ingestion and chunking — done**
 
-- Python 3.11+
-- Node.js 18+
-- Docker
-- Git
+- [x] `ingestion/chunker.py` — splits raw text into overlapping word-boundary
+      chunks. `chunk_size` and `overlap` are explicit parameters. Character
+      offsets (`start_char`, `end_char`) on every chunk locate it exactly in
+      the source document — verified in tests by extracting
+      `text[start_char:end_char]` and comparing to `chunk.text`.
+- [x] 14 tests: chunk count, overlap correctness, character offsets, edge
+      cases (empty text, overlap >= chunk_size).
+
+**Phase 2: Sentence embeddings — done**
+
+- [x] `embeddings/embedder.py` — wraps `sentence-transformers/all-MiniLM-L6-v2`
+      (384-dim, 22M params) with lazy loading, batch processing, and L2
+      normalization so cosine similarity reduces to dot product in the vector store.
+- [x] 8 fast tests with mock model (no download needed).
+- [x] 2 slow integration tests verify real semantic similarity.
+
+**Phase 3: Flat vector store with cosine similarity search — done**
+
+- [x] `retriever/vector_store.py` — pre-allocated (N, dim) NumPy matrix.
+      Retrieves top-K chunks via dot product using `argpartition` for O(N)
+      candidate selection before the final O(k log k) sort.
+- [x] `save()` / `load()` persistence via `.npz`.
+- [x] 14 tests: add/size tracking, exact-match retrieval, sorted results,
+      save/load round-trip, chunk metadata preservation.
+
+**Phase 4: RAG pipeline — done**
+
+- [x] `pipeline/rag_pipeline.py` — wires chunker + embedder + vector store.
+      `ingest()` chunks and embeds; `retrieve()` searches; `query()` formats
+      a grounded prompt and calls the generator.
+- [x] `make_hf_generator()` calls the HuggingFace Inference API (free tier).
+- [x] 15 tests using mock embedder and mock generator.
+
+**Phase 5: FastAPI server — done**
+
+- [x] `server/app.py` — `POST /ingest`, `POST /query`, `GET /health`.
+- [x] Input validation: empty documents, empty question, query before ingest
+      all return 400 with clear error messages.
+- [x] 10 tests using FastAPI TestClient with mock pipeline.
+
+**Planned:**
+
+- [ ] Phase 6: Docker + AWS/GCP deployment with live public endpoint
 
 ---
 
-## Run in Local
-Steps to follow: 
+## Running tests
 
 ```bash
-git clone https://github.com/AaryaBhatt9/SER594-Team4-SkillSync.git
-cd SER594-Team4-SkillSync
-cp .env.example .env
-docker compose up --build -d
-docker compose exec backend python -m scripts.ingest_profiles
-```
-
-After that, here's where everything lives:
-- Frontend → http://localhost:3000
-- Backend API → http://localhost:8000
-- Swagger Docs → http://localhost:8000/docs
-- PostgreSQL → localhost:5432
-- ChromaDB → localhost:8001
-
----
-
-## Running Without Docker
-
-Alternatively, if you prefer not to use Docker or would like to run modules independently, then the following should do the trick:
-
-### Backend
-
-```bash
-cd backend
 python -m venv venv
-source venv/bin/activate      # Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
-
-export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/skillsync
-export SECRET_KEY=<any-your-secret-key-for-jwt>
-
-psql -U postgres -d skillsync -f migrations/001_initial_schema.sql
-psql -U postgres -d skillsync -f migrations/002_recommendation_history.sql
-python -m scripts.ingest_profiles
-uvicorn app.main:app --reload --port 8000
+python -m pytest tests/ -v -m "not slow"   # 61 tests, no download needed
+python -m pytest tests/ -v                  # 63 tests including real model
 ```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend runs at http://localhost:3000.
 
 ---
 
-## Environment Variables
-
-| Variable | Description | Default |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://skillsync:skillsync@localhost:5432/skillsync` |
-| `SECRET_KEY` | JWT signing secret | `super-secret-dev-key` |
-| `ALGORITHM` | JWT algorithm | `HS256` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token expiry in minutes | `60` |
-| `CHROMA_MODE` | `local` for embedded persistent Chroma, `http` for external Chroma | `http` |
-| `CHROMA_HOST` | ChromaDB host | `localhost` |
-| `CHROMA_PORT` | ChromaDB port | `8001` |
-| `CHROMA_PERSIST_DIR` | Local Chroma storage path when `CHROMA_MODE=local` | `./chroma_data` |
-| `NEXT_PUBLIC_API_URL` | Backend URL for frontend | `http://localhost:8000` |
-| `NEXT_PUBLIC_API_BASE_URL` | Backend URL for frontend | `http://localhost:8000` |
-| `CORS_ORIGINS` | Comma-separated allowed frontend origins | `http://localhost:3000` |
-
----
-
-## Authentication
-
-### Create an account
+## Running the server locally
 
 ```bash
-curl -X POST http://localhost:8000/auth/register \
+pip install uvicorn
+uvicorn server.app:app --reload --port 8000
+```
+
+Ingest a document:
+
+```bash
+curl -X POST http://localhost:8000/ingest \
   -H "Content-Type: application/json" \
-  -d '{"name": "User One", "email": "user1@example.com", "password": "password123"}'
+  -d '{"documents": [{"text": "Paris is the capital of France.", "source": "geo.txt"}]}'
 ```
 
-```json
-{"id": 1, "name": "User One", "email": "user1@example.com"}
-```
-
-### Log in
+Ask a question:
 
 ```bash
-curl -X POST http://localhost:8000/auth/login \
+curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
-  -d '{"email": "user1@example.com", "password": "password123"}'
+  -d '{"question": "What is the capital of France?"}'
 ```
 
-```json
-{"access_token": "eyJ...", "token_type": "bearer"}
+Set `HF_API_KEY` environment variable to enable real LLM generation.
+
+---
+
+## Project layout
+
 ```
-
-### Hit a protected route
-
-```bash
-curl http://localhost:8000/auth/me \
-  -H "Authorization: Bearer <your_token>"
+rag-from-scratch/
+├── ingestion/
+│   └── chunker.py              <- word-boundary chunking with overlap (Phase 1)
+├── embeddings/
+│   └── embedder.py             <- sentence-transformers wrapper (Phase 2)
+├── retriever/
+│   └── vector_store.py         <- flat cosine similarity search, save/load (Phase 3)
+├── pipeline/
+│   └── rag_pipeline.py         <- ingest + retrieve + generate (Phase 4)
+├── server/
+│   └── app.py                  <- FastAPI /ingest, /query, /health (Phase 5)
+├── benchmark/                  <- retrieval benchmarks (planned)
+├── tests/                      <- one test file per module (61 fast tests)
+└── requirements.txt
 ```
 
 ---
 
-## Technique #1 For Artificial Intelligence (AI) – Semantic Matching Through ChromaDB
+## Author
 
-And this is where the magic happens. Here is how:
-
-### First step: Load seed profiles. 
-
-Seed profiles are ready for you to use inside `app/data/seed_profiles.json`. In total, there are 10 seed profiles. No need for user accounts just yet. Run this script below to load them:
-
-**Then try a search:**
-
-```bash
-curl -X POST http://localhost:8000/match/search \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <your_token>" \
-  -d '{
-    "skills": ["Python", "FastAPI"],
-    "goals": ["build AI projects"],
-    "availability": "weekends",
-    "skill_level": "intermediate",
-    "top_k": 3
-  }'
-```
-
-```json
-{
-  "matches": [
-    {
-      "user_id": "user_1",
-      "score": 0.1745,
-      "explanation": "Common interests/skills: availability, build, goals, intermediate, level"
-    },
-  ]
-}
-```
-
-The `score` is cosine similarity — 0.91 means the profiles are very closely aligned. Anything above 0.75 is generally a solid match.
-
----
-## Technique #2 For Artificial Intelligence (AI) – Multi-Agent Recommendation Pipeline
-
-Beyond semantic embeddings, SkillSync uses a multi-agent pipeline to score and rank candidates. The pipeline is orchestrated in `backend/app/services/recommendation_pipeline.py` and consists of 5 agents:
-
-1. **Profile Parser** (`agents/profile_parser.py`) — Normalizes the user's raw input (skills, goals, availability, skill level) into a clean, searchable profile.
-2. **Candidate Retriever** (`agents/candidate_retriever.py`) — Queries ChromaDB with the parsed profile's embedding to retrieve the top-K semantically similar candidates.
-3. **Skill Compatibility** (`agents/skill_compatibility.py`) — Computes Jaccard similarity between the user's skill set and each candidate's skill set, producing a score and reasoning.
-4. **Goal Alignment** (`agents/goal_alignment.py`) — Same Jaccard approach but on goals, scoring how well each candidate's goals align with the user's.
-5. **Recommendation Ranker** (`agents/recommendation_ranker.py`) — Combines skill (50%), goal (30%), and availability (20%) scores into a final compatibility score, ranks all candidates, and flags risk factors.
-
-Each agent operates independently with a single responsibility, making the system easy to test and extend. For a deeper discussion of why we chose this architecture, see [`docs/DESIGN.md`](docs/DESIGN.md).
-
-### Evaluation
-
-We evaluated the pipeline's recommendation relevance (Precision@K) against a random baseline, and measured response latency. Full results are in [`eval/evaluation_report.md`](eval/evaluation_report.md), and the evaluation script can be run with:
-
-```bash
-python eval/run_evaluation.py
-```
-
----
-
-## Deployment
-
-The system is deployed via Docker Compose. To run the full stack:
-
-```bash
-docker compose up --build -d
-```
-
-To reset the database (required if schema changes):
-
-```bash
-docker compose down -v
-docker compose up --build -d
-docker compose exec backend python -m scripts.ingest_profiles
-```
-
----
-
-## Tests
-
-```bash
-cd backend
-pip install pytest httpx
-pytest tests/ -v
-```
-
-## Architecture
-
-See the architecture diagram: `docs/architecture-diagram.pdf`.
-It's an oversimplification of the following architecture:
-Next.js interacts with FastAPI through REST,
-FastAPI saves user information in Postgres and embeddings in ChromaDB,
-When searching, we generate embeddings and run similarity search in vector store.
-we have an layer with JWT tokens on the backend side.
+**Sujan Uppalli Jayadevappa**
+MS Software Engineering — Arizona State University
