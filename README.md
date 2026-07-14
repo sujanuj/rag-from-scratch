@@ -1,3 +1,5 @@
+[![CI/CD](https://github.com/sujanuj/rag-from-scratch/actions/workflows/ci.yml/badge.svg)](https://github.com/sujanuj/rag-from-scratch/actions/workflows/ci.yml)
+
 # rag-from-scratch
 
 A retrieval-augmented generation (RAG) pipeline built from scratch in Python. No LangChain, no LlamaIndex, no Pinecone — every component (chunking, embedding, vector search, generation, serving, and deployment) is implemented directly so the mechanics are fully visible and measurable.
